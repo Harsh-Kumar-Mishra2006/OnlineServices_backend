@@ -15,6 +15,7 @@ const path = require('path');
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
+  'https://onlineservices-rl5s.onrender.com'
 ];
 
 const corsOptions = {
