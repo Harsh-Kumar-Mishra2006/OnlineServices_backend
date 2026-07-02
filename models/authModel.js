@@ -1,11 +1,20 @@
-//authModel.js
 const mongoose = require('mongoose');
 
 const authSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  username: { type: String, required: true, unique: true },
-  phone: { type: String, required: true },
+  email: { 
+    type: String, 
+    unique: true,
+    sparse: true, // Allows null/undefined for workers without email
+    default: null 
+  },
+  username: { 
+    type: String, 
+    unique: true,
+    sparse: true,
+    default: null 
+  },
+  phone: { type: String, required: true, unique: true }, // Phone is primary
   password: { type: String, required: true },
   role: { 
     type: String, 

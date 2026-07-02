@@ -204,7 +204,7 @@ const createWorkerByAdmin = async (req, res) => {
       email, username // Optional fields
     } = req.body;
 
-    // Validate required fields
+    // Validate required fields - email is NOT required anymore
     if (!name || !phone || !password || !service_type) {
       return res.status(400).json({
         success: false,
@@ -267,9 +267,9 @@ const createWorkerByAdmin = async (req, res) => {
     // Create Auth entry for worker with the provided password
     const authWorker = await auth.create({
       name,
-      email: email || null,
-      username: username || null,
-      phone, // Phone is required and unique
+      email: email || null, // Allow null
+      username: username || null, // Allow null
+      phone, // Phone is required
       password: hashedPassword,
       role: 'worker',
       isVerified: true,
@@ -279,7 +279,7 @@ const createWorkerByAdmin = async (req, res) => {
     // Create Worker profile - email is optional now
     const workerProfile = await Worker.create({
       name,
-      email: email || null,
+      email: email || null, // Allow null
       phone_number: phone,
       service_type,
       address: address || {
@@ -300,14 +300,16 @@ const createWorkerByAdmin = async (req, res) => {
 
     console.log(`✅ Worker created successfully by admin ${admin.email}`);
 
-    res.status(201).json({
+    // Prepare response - don't send password back
+    const responseData = {
       success: true,
-      message: 'Worker account created successfully. Worker can now login with phone number and password.',
+      message: 'Worker account created successfully. Worker can login with phone number and password.',
       data: {
         worker: {
           id: workerProfile._id,
           name: workerProfile.name,
           phone: workerProfile.phone_number,
+          email: workerProfile.email || 'Not provided',
           service_type: workerProfile.service_type,
           hourly_rate: workerProfile.hourly_rate,
           status: workerProfile.status
@@ -315,15 +317,22 @@ const createWorkerByAdmin = async (req, res) => {
         auth: {
           id: authWorker._id,
           phone: authWorker.phone,
-          email: authWorker.email,
-          username: authWorker.username,
+          email: authWorker.email || 'Not provided',
+          username: authWorker.username || 'Not provided',
         },
         credentials: {
           phone: authWorker.phone,
           password: password // Only send this once for the admin to share with worker
         }
       }
-    });
+    };
+
+    // If email wasn't provided, add a note
+    if (!email) {
+      responseData.note = 'Email was not provided. Worker will login using phone number only.';
+    }
+
+    res.status(201).json(responseData);
 
   } catch (err) {
     console.error('Error creating worker:', err);
@@ -442,8 +451,8 @@ const login = async (req, res) => {
       user: {
         id: user._id,
         name: user.name,
-        email: user.email,
-        username: user.username,
+        email: user.email || 'Not provided',
+        username: user.username || 'Not provided',
         phone: user.phone,
         role: user.role,
         profile: user.profile
