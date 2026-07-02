@@ -1,3 +1,4 @@
+//models/addWorker.js
 const mongoose = require('mongoose');
 
 // Service categories enum
@@ -27,10 +28,11 @@ const workerSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: [true, 'Email is required'],
     unique: true,
     trim: true,
     lowercase: true,
+    sparse:true,
+    default: null,
     match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
   },
   service_type: {
@@ -45,6 +47,7 @@ const workerSchema = new mongoose.Schema({
   phone_number: {
     type: String,
     required: [true, 'Phone number is required'],
+    unique: true,
     trim: true,
     match: [/^[0-9]{10,15}$/, 'Please enter a valid phone number']
   },
@@ -138,6 +141,7 @@ const workerSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
+workerSchema.index({ phone_number: 1 }); // Phone is now primary
 workerSchema.index({ email: 1 });
 workerSchema.index({ service_type: 1 });
 workerSchema.index({ status: 1 });

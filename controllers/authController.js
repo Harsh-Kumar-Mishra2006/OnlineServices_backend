@@ -52,9 +52,9 @@ const checkWorkerAuthorization = async (req, res) => {
       });
     }
 
-    // Check if worker profile exists and is active
+    // Check if worker profile exists and is active - using phone number
     const worker = await Worker.findOne({ 
-      email: user.email,
+      phone_number: user.phone,
       status: { $in: ['active', 'busy'] }
     });
 
@@ -65,7 +65,7 @@ const checkWorkerAuthorization = async (req, res) => {
         worker: {
           id: worker._id,
           name: worker.name,
-          email: worker.email,
+          phone: worker.phone_number,
           service_type: worker.service_type,
           status: worker.status
         }
@@ -93,10 +93,11 @@ const signup = async (req, res) => {
 
   console.log('📝 Signup request received:', { name, email, username, phone, role });
 
-  if (!name || !email || !password || !username || !phone) {
+  // For users, phone is required, email and username are optional
+  if (!name || !phone || !password) {
     return res.status(400).json({ 
       success: false,
-      error: 'Name, email, username, phone number and password are required' 
+      error: 'Name, phone number and password are required' 
     });
   }
 
@@ -110,16 +111,36 @@ const signup = async (req, res) => {
   }
 
   try {
-    // Check if user already exists
-    const existingUser = await auth.findOne({
-      $or: [{ email }, { username }]
-    });
+    // Check if user already exists by phone
+    const existingUser = await auth.findOne({ phone });
 
     if (existingUser) {
       return res.status(400).json({ 
         success: false,
-        message: 'Email or username already registered' 
+        message: 'Phone number already registered' 
       });
+    }
+
+    // If email provided, check for uniqueness
+    if (email) {
+      const existingEmail = await auth.findOne({ email });
+      if (existingEmail) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Email already registered' 
+        });
+      }
+    }
+
+    // If username provided, check for uniqueness
+    if (username) {
+      const existingUsername = await auth.findOne({ username });
+      if (existingUsername) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Username already taken' 
+        });
+      }
     }
 
     // Hash password
@@ -136,13 +157,13 @@ const signup = async (req, res) => {
     
     const createuser = await auth.create({ 
       name,
-      email, 
-      username, 
+      email: email || null,
+      username: username || null,
       phone,
       password: hash,
-      role: role, // 'user' or 'admin'
+      role: role,
       profile: userProfile,
-      isVerified: true, // Auto-verify users and admins
+      isVerified: true,
       isActive: true
     });
 
@@ -173,20 +194,21 @@ const signup = async (req, res) => {
   }
 };
 
-// Admin creates worker with manual password (worker login directly with this)
+// Admin creates worker with phone number as primary login
 const createWorkerByAdmin = async (req, res) => {
   try {
     const { 
-      name, email, username, phone, password, 
+      name, phone, password, 
       service_type, address, experience_years, 
-      skills, hourly_rate, bio, certifications 
+      skills, hourly_rate, bio, certifications,
+      email, username // Optional fields
     } = req.body;
 
     // Validate required fields
-    if (!name || !email || !username || !phone || !password || !service_type) {
+    if (!name || !phone || !password || !service_type) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: name, email, username, phone, password, service_type'
+        error: 'Missing required fields: name, phone, password, service_type'
       });
     }
 
@@ -206,16 +228,36 @@ const createWorkerByAdmin = async (req, res) => {
       });
     }
 
-    // Check if worker already exists in Auth
-    const existingWorker = await auth.findOne({ 
-      $or: [{ email }, { username }] 
-    });
+    // Check if worker already exists by phone
+    const existingWorker = await auth.findOne({ phone });
     
     if (existingWorker) {
       return res.status(400).json({
         success: false,
-        error: 'Email or username already registered'
+        error: 'Phone number already registered'
       });
+    }
+
+    // If email provided, check for uniqueness
+    if (email) {
+      const existingEmail = await auth.findOne({ email });
+      if (existingEmail) {
+        return res.status(400).json({
+          success: false,
+          error: 'Email already registered'
+        });
+      }
+    }
+
+    // If username provided, check for uniqueness
+    if (username) {
+      const existingUsername = await auth.findOne({ username });
+      if (existingUsername) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username already taken'
+        });
+      }
     }
 
     // Hash the manually provided password
@@ -225,19 +267,19 @@ const createWorkerByAdmin = async (req, res) => {
     // Create Auth entry for worker with the provided password
     const authWorker = await auth.create({
       name,
-      email,
-      username,
-      phone,
-      password: hashedPassword, // Worker will use this to login
+      email: email || null,
+      username: username || null,
+      phone, // Phone is required and unique
+      password: hashedPassword,
       role: 'worker',
-      isVerified: true, // Auto-verified since admin creates
+      isVerified: true,
       isActive: true
     });
 
-    // Create Worker profile with ACTIVE status (since admin created it)
+    // Create Worker profile - email is optional now
     const workerProfile = await Worker.create({
       name,
-      email,
+      email: email || null,
       phone_number: phone,
       service_type,
       address: address || {
@@ -252,7 +294,7 @@ const createWorkerByAdmin = async (req, res) => {
       certifications: certifications || [],
       bio: bio || '',
       hourly_rate: hourly_rate || 0,
-      status: 'active', // Admin created worker is immediately active
+      status: 'active',
       created_by: admin._id
     });
 
@@ -260,25 +302,24 @@ const createWorkerByAdmin = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Worker account created successfully. Worker can now login with the provided credentials.',
+      message: 'Worker account created successfully. Worker can now login with phone number and password.',
       data: {
         worker: {
           id: workerProfile._id,
           name: workerProfile.name,
-          email: workerProfile.email,
+          phone: workerProfile.phone_number,
           service_type: workerProfile.service_type,
           hourly_rate: workerProfile.hourly_rate,
           status: workerProfile.status
         },
         auth: {
           id: authWorker._id,
+          phone: authWorker.phone,
           email: authWorker.email,
           username: authWorker.username,
-          // Don't send password back
         },
         credentials: {
-          email: authWorker.email,
-          username: authWorker.username,
+          phone: authWorker.phone,
           password: password // Only send this once for the admin to share with worker
         }
       }
@@ -293,29 +334,37 @@ const createWorkerByAdmin = async (req, res) => {
   }
 };
 
-// Login function - works for all roles (user, admin, worker)
+// Login function - now supports phone number login for workers
 const login = async (req, res) => {
   try {
-    const { email, username, password } = req.body;
+    const { email, username, phone, password } = req.body;
 
-    if ((!email && !username) || !password) {
+    // Check if at least one identifier is provided
+    if ((!email && !username && !phone) || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email/username and password are required'
+        error: 'Phone/email/username and password are required'
       });
     }
 
-    let user = await auth.findOne({
-      $or: [
-        { email: email || '' },
-        { username: username || '' }
-      ]
-    });
+    let user = null;
+
+    // Build query based on what's provided
+    let query = {};
+    if (phone) {
+      query.phone = phone;
+    } else if (email) {
+      query.email = email;
+    } else if (username) {
+      query.username = username;
+    }
+
+    user = await auth.findOne(query);
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email/username or password'
+        error: 'Invalid credentials'
       });
     }
 
@@ -332,14 +381,14 @@ const login = async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email/username or password'
+        error: 'Invalid credentials'
       });
     }
 
-    // For workers: Check if they have a worker profile (should exist since admin created them)
+    // For workers: Check if they have a worker profile
     if (user.role === 'worker') {
       const workerProfile = await Worker.findOne({ 
-        email: user.email
+        phone_number: user.phone // Use phone number to find worker
       });
 
       if (!workerProfile) {
@@ -357,7 +406,7 @@ const login = async (req, res) => {
         });
       }
 
-      // Check if worker is pending (shouldn't happen with admin creation, but just in case)
+      // Check if worker is pending
       if (workerProfile.status === 'pending') {
         return res.status(403).json({
           success: false,
@@ -371,6 +420,7 @@ const login = async (req, res) => {
         userId: user._id, 
         email: user.email,
         username: user.username,
+        phone: user.phone,
         role: user.role,
         name: user.name
       }, 
@@ -394,6 +444,7 @@ const login = async (req, res) => {
         name: user.name,
         email: user.email,
         username: user.username,
+        phone: user.phone,
         role: user.role,
         profile: user.profile
       },
@@ -483,7 +534,7 @@ const updateWorkerProfile = async (req, res) => {
     }
     
     const updatedWorker = await Worker.findOneAndUpdate(
-      { email: user.email },
+      { phone_number: user.phone }, // Use phone number to find worker
       req.body,
       { new: true, runValidators: true }
     );
@@ -634,8 +685,6 @@ const debugToken = async (req, res) => {
   }
 };
 
-// Add these new functions to your authController.js
-
 // ADMIN: Get all workers (including pending/inactive)
 const getAllWorkersForAdmin = async (req, res) => {
   try {
@@ -662,7 +711,7 @@ const getAllWorkersForAdmin = async (req, res) => {
 
     // Get auth info for each worker
     const workersWithAuth = await Promise.all(workers.map(async (worker) => {
-      const authUser = await auth.findOne({ email: worker.email });
+      const authUser = await auth.findOne({ phone: worker.phone_number });
       return {
         ...worker.toObject(),
         username: authUser?.username || '',
@@ -766,7 +815,7 @@ const deleteWorker = async (req, res) => {
       });
     }
 
-    // Find worker to get email
+    // Find worker to get phone number
     const worker = await Worker.findById(id);
     if (!worker) {
       return res.status(404).json({
@@ -778,8 +827,8 @@ const deleteWorker = async (req, res) => {
     // Delete worker profile
     await Worker.findByIdAndDelete(id);
 
-    // Delete auth entry
-    await auth.findOneAndDelete({ email: worker.email });
+    // Delete auth entry using phone number
+    await auth.findOneAndDelete({ phone: worker.phone_number });
 
     res.json({
       success: true,
@@ -794,6 +843,7 @@ const deleteWorker = async (req, res) => {
     });
   }
 };
+
 module.exports = {
   signup,
   login,
