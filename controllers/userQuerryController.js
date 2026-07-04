@@ -704,6 +704,314 @@ const getAvailableWorkersForQuery = async (req, res) => {
   }
 };
 
+// ============= WORKER ASSIGNMENT MANAGEMENT =============
+
+// Get all assignments with worker and query details (Admin)
+const getAllAssignments = async (req, res) => {
+  try {
+    const {
+      status,
+      worker_id,
+      service_type,
+      date_from,
+      date_to,
+      page = 1,
+      limit = 20
+    } = req.query;
+
+    let query = { assigned_to: { $ne: null } }; // Only get assigned queries
+
+    // Filters
+    if (status) query.status = status;
+    if (worker_id) query.assigned_to = worker_id;
+    if (service_type) query.service_type_required = service_type;
+    
+    // Date range filter
+    if (date_from || date_to) {
+      query.assigned_at = {};
+      if (date_from) query.assigned_at.$gte = new Date(date_from);
+      if (date_to) query.assigned_at.$lte = new Date(date_to);
+    }
+
+    const assignments = await UserQuery.find(query)
+      .populate('user', 'name email phone')
+      .populate('assigned_to', 'name service_type phone_number hourly_rate rating experience_years status')
+      .populate('assigned_by', 'name email')
+      .sort({ assigned_at: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await UserQuery.countDocuments(query);
+
+    // Get summary statistics
+    const summary = {
+      total_assignments: await UserQuery.countDocuments({ assigned_to: { $ne: null } }),
+      active_assignments: await UserQuery.countDocuments({ 
+        assigned_to: { $ne: null },
+        status: { $in: ['assigned', 'in_progress'] }
+      }),
+      completed_assignments: await UserQuery.countDocuments({ 
+        assigned_to: { $ne: null },
+        status: 'completed'
+      }),
+      pending_completion: await UserQuery.countDocuments({
+        assigned_to: { $ne: null },
+        status: { $in: ['assigned', 'in_progress'] },
+        scheduled_date: { $lt: new Date() }
+      })
+    };
+
+    res.json({
+      success: true,
+      data: assignments,
+      summary,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit)
+    });
+
+  } catch (error) {
+    console.error('Error fetching assignments:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Get worker's assignment history (Admin/Worker)
+const getWorkerAssignments = async (req, res) => {
+  try {
+    const { workerId } = req.params;
+    const { status, page = 1, limit = 10 } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(workerId)) {
+      return res.status(400).json({ success: false, error: 'Invalid worker ID' });
+    }
+
+    const worker = await Worker.findById(workerId);
+    if (!worker) {
+      return res.status(404).json({ success: false, error: 'Worker not found' });
+    }
+
+    let query = { assigned_to: workerId };
+    if (status) query.status = status;
+
+    const assignments = await UserQuery.find(query)
+      .populate('user', 'name email phone address')
+      .populate('assigned_by', 'name email')
+      .sort({ assigned_at: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await UserQuery.countDocuments(query);
+
+    // Worker performance metrics
+    const completed = await UserQuery.countDocuments({ 
+      assigned_to: workerId, 
+      status: 'completed' 
+    });
+    
+    const ratings = await UserQuery.find({ 
+      assigned_to: workerId, 
+      rating: { $ne: null } 
+    });
+
+    const avgRating = ratings.length > 0 
+      ? ratings.reduce((sum, q) => sum + q.rating, 0) / ratings.length 
+      : 0;
+
+    res.json({
+      success: true,
+      data: {
+        worker: {
+          id: worker._id,
+          name: worker.name,
+          service_type: worker.service_type,
+          rating: worker.rating,
+          total_reviews: worker.total_reviews,
+          status: worker.status
+        },
+        assignments,
+        metrics: {
+          total: total,
+          completed: completed,
+          pending: total - completed,
+          average_rating: avgRating,
+          total_reviews: ratings.length
+        },
+        page: parseInt(page),
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching worker assignments:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Reassign worker (Admin)
+const reassignWorker = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { worker_id, scheduled_date, admin_notes } = req.body;
+
+    if (!worker_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'New worker ID is required'
+      });
+    }
+
+    const query = await UserQuery.findById(id);
+    if (!query) {
+      return res.status(404).json({ success: false, error: 'Query not found' });
+    }
+
+    if (!query.assigned_to) {
+      return res.status(400).json({
+        success: false,
+        error: 'This query is not assigned to any worker'
+      });
+    }
+
+    // Get new worker
+    const newWorker = await Worker.findById(worker_id);
+    if (!newWorker) {
+      return res.status(404).json({ success: false, error: 'Worker not found' });
+    }
+
+    // Get admin info
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, 'mypassword');
+    const admin = await Auth.findById(decoded.userId);
+
+    // Store old worker for history
+    const oldWorkerId = query.assigned_to;
+
+    // Update assignment
+    query.assigned_to = worker_id;
+    query.assigned_by = admin._id;
+    query.assigned_at = new Date();
+    if (scheduled_date) query.scheduled_date = new Date(scheduled_date);
+    if (admin_notes) query.admin_notes = admin_notes;
+    query.updated_at = new Date();
+    await query.save();
+
+    console.log(`🔄 Worker reassigned: ${oldWorkerId} -> ${worker_id} for query ${query._id}`);
+
+    res.json({
+      success: true,
+      message: `Worker reassigned to ${newWorker.name} successfully`,
+      data: {
+        query: {
+          id: query._id,
+          status: query.status,
+          assigned_at: query.assigned_at
+        },
+        old_worker: oldWorkerId,
+        new_worker: {
+          id: newWorker._id,
+          name: newWorker.name,
+          service_type: newWorker.service_type
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error reassigning worker:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Get assignment statistics (Admin)
+const getAssignmentStats = async (req, res) => {
+  try {
+    // Overall stats
+    const totalAssigned = await UserQuery.countDocuments({ assigned_to: { $ne: null } });
+    const inProgress = await UserQuery.countDocuments({ status: 'in_progress' });
+    const completed = await UserQuery.countDocuments({ status: 'completed' });
+    const cancelled = await UserQuery.countDocuments({ status: 'cancelled' });
+
+    // Worker stats
+    const workerStats = await Worker.aggregate([
+      {
+        $lookup: {
+          from: 'userqueries',
+          localField: '_id',
+          foreignField: 'assigned_to',
+          as: 'assignments'
+        }
+      },
+      {
+        $project: {
+          name: 1,
+          service_type: 1,
+          rating: 1,
+          status: 1,
+          total_assignments: { $size: '$assignments' },
+          completed_assignments: {
+            $size: {
+              $filter: {
+                input: '$assignments',
+                as: 'assignment',
+                cond: { $eq: ['$$assignment.status', 'completed'] }
+              }
+            }
+          },
+          active_assignments: {
+            $size: {
+              $filter: {
+                input: '$assignments',
+                as: 'assignment',
+                cond: { $in: ['$$assignment.status', ['assigned', 'in_progress']] }
+              }
+            }
+          }
+        }
+      },
+      { $sort: { total_assignments: -1 } }
+    ]);
+
+    // Recent assignments
+    const recentAssignments = await UserQuery.find({ assigned_to: { $ne: null } })
+      .populate('assigned_to', 'name service_type')
+      .populate('user', 'name')
+      .sort({ assigned_at: -1 })
+      .limit(10);
+
+    res.json({
+      success: true,
+      data: {
+        overview: {
+          total_assigned: totalAssigned,
+          in_progress: inProgress,
+          completed: completed,
+          cancelled: cancelled,
+          completion_rate: totalAssigned > 0 ? (completed / totalAssigned * 100).toFixed(1) : 0
+        },
+        worker_stats: workerStats,
+        recent_assignments: recentAssignments
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching assignment stats:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+
 module.exports = {
   // User functions
   createQuery,
@@ -718,5 +1026,10 @@ module.exports = {
   assignWorker,
   updateQueryStatus,
   getPendingQueriesCount,
-  getAvailableWorkersForQuery
+  getAvailableWorkersForQuery,
+
+  getAllAssignments,
+  getWorkerAssignments,
+  reassignWorker,
+  getAssignmentStats,
 };

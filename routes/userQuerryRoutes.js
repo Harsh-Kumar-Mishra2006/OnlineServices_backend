@@ -15,7 +15,12 @@ const {
   assignWorker,
   updateQueryStatus,
   getPendingQueriesCount,
-  getAvailableWorkersForQuery
+  getAvailableWorkersForQuery,
+
+  getAllAssignments,
+  getWorkerAssignments,
+  reassignWorker,
+  getAssignmentStats
 } = require('../controllers/userQuerryController');
 
 // ============= USER ROUTES (authenticated users) =============
@@ -32,5 +37,11 @@ router.post('/admin/:id/assign', authenticateToken, assignWorker);
 router.put('/admin/:id/status', authenticateToken, updateQueryStatus);
 router.get('/admin/dashboard/counts', authenticateToken, getPendingQueriesCount);
 router.get('/admin/:id/available-workers', authenticateToken, getAvailableWorkersForQuery);
+
+// Add these routes
+router.get('/admin/assignments/all', authenticateToken, getAllAssignments);
+router.get('/admin/assignments/worker/:workerId', authenticateToken, getWorkerAssignments);
+router.get('/admin/assignments/stats', authenticateToken, getAssignmentStats);
+router.put('/admin/assignments/:id/reassign', authenticateToken, reassignWorker);
 
 module.exports = router;
