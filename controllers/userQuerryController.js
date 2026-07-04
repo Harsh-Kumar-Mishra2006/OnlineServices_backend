@@ -333,11 +333,15 @@ const getAllQueries = async (req, res) => {
   }
 };
 
+// userQuerryController.js - Fixed assignWorker function
+
 // Assign worker to query (Admin)
 const assignWorker = async (req, res) => {
   try {
     const { id } = req.params;
     const { worker_id, scheduled_date, admin_notes } = req.body;
+    
+    console.log(`📝 Assigning worker ${worker_id} to query ${id}`);
     
     if (!worker_id) {
       return res.status(400).json({
@@ -346,89 +350,122 @@ const assignWorker = async (req, res) => {
       });
     }
     
-    // Get query
+    // Validate worker_id format
+    if (!mongoose.Types.ObjectId.isValid(worker_id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid worker ID format'
+      });
+    }
+    
+    // Get query with proper population
     const query = await UserQuery.findById(id);
     if (!query) {
       return res.status(404).json({ success: false, error: 'Query not found' });
     }
     
-    // Check if already assigned
-    if (query.status !== 'pending') {
+    console.log(`📋 Query status: ${query.status}, Service: ${query.service_type_required}`);
+    
+    // Check if already assigned - allow reassignment if status is 'assigned' or 'in_progress'
+    if (query.status === 'completed' || query.status === 'cancelled') {
       return res.status(400).json({
         success: false,
-        error: `Cannot assign worker. Query status is ${query.status}`
+        error: `Cannot assign worker. Query is ${query.status}`
       });
     }
     
-    // Get worker
+    // Get worker with proper error handling
     const worker = await Worker.findById(worker_id);
     if (!worker) {
-      return res.status(404).json({ success: false, error: 'Worker not found' });
-    }
-    
-    // Verify worker service type matches
-    if (worker.service_type !== query.service_type_required) {
-      return res.status(400).json({
-        success: false,
-        error: `Worker specializes in ${worker.service_type}, but query requires ${query.service_type_required}`
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Worker not found. Please check the worker ID.' 
       });
     }
     
-    // Check worker availability
-    if (worker.status !== 'active') {
+    console.log(`👤 Worker found: ${worker.name}, Service: ${worker.service_type}, Status: ${worker.status}`);
+    
+    // Verify worker service type matches (case insensitive comparison)
+    const workerService = worker.service_type?.toLowerCase().trim();
+    const queryService = query.service_type_required?.toLowerCase().trim();
+    
+    if (workerService !== queryService) {
+      console.log(`⚠️ Service mismatch: Worker=${workerService}, Query=${queryService}`);
       return res.status(400).json({
         success: false,
-        error: `Worker is currently ${worker.status} and not available`
+        error: `Worker specializes in "${worker.service_type}", but query requires "${query.service_type_required}"`
+      });
+    }
+    
+    // Check worker availability - allow 'active' or 'pending' status
+    if (worker.status !== 'active' && worker.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        error: `Worker is currently ${worker.status} and not available for assignment`
       });
     }
     
     // Get admin info
     const token = req.header('Authorization')?.replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, 'mypassword');
     const admin = await Auth.findById(decoded.userId);
     
-    // Assign worker
-    query.assigned_to = worker_id;
-    query.assigned_by = admin._id;
-    query.assigned_at = new Date();
-    query.status = 'assigned';
-    if (scheduled_date) query.scheduled_date = new Date(scheduled_date);
-    if (admin_notes) query.admin_notes = admin_notes;
-    query.updated_at = new Date();
+    if (!admin) {
+      return res.status(404).json({ success: false, error: 'Admin not found' });
+    }
     
-    await query.save();
+    // Assign worker - update all relevant fields
+    const updateData = {
+      assigned_to: worker_id,
+      assigned_by: admin._id,
+      assigned_at: new Date(),
+      status: 'assigned',
+      updated_at: new Date()
+    };
     
-    // Update worker status to busy if needed
-    // worker.status = 'busy';
-    // await worker.save();
+    if (scheduled_date) {
+      updateData.scheduled_date = new Date(scheduled_date);
+    }
     
-    console.log(`✅ Worker ${worker.name} assigned to query ${query._id} by admin ${admin.email}`);
+    if (admin_notes) {
+      updateData.admin_notes = admin_notes;
+    }
+    
+    // Update query
+    const updatedQuery = await UserQuery.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    ).populate('assigned_to', 'name service_type phone_number hourly_rate rating')
+     .populate('assigned_by', 'name email');
+    
+    console.log(`✅ Worker ${worker.name} assigned to query ${id} by admin ${admin.email}`);
     
     res.json({
       success: true,
       message: `Worker ${worker.name} assigned successfully`,
       data: {
-        query: {
-          id: query._id,
-          status: query.status,
-          assigned_at: query.assigned_at,
-          scheduled_date: query.scheduled_date
-        },
+        query: updatedQuery,
         worker: {
           id: worker._id,
           name: worker.name,
           service_type: worker.service_type,
-          phone: worker.phone_number
+          phone: worker.phone_number,
+          rating: worker.rating
         }
       }
     });
     
   } catch (error) {
-    console.error('Error assigning worker:', error);
+    console.error('❌ Error assigning worker:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message || 'Internal server error while assigning worker'
     });
   }
 };
