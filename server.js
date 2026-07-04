@@ -6,6 +6,8 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoute');
 const assignmentRoutes = require('./routes/assignmentRoutes');
 const userQuerryRoutes = require('./routes/userQuerryRoutes');
+const workerAssignmentRoutes = require('./routes/WorkerAssignmentRoutes');
+
 
 const app = express();
 connectDB();
@@ -68,6 +70,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/assignments', assignmentRoutes);
 app.use('/api/queries', userQuerryRoutes);
 app.use('/api/assignments', assignmentRoutes);
+app.use('/api/worker/assignments', workerAssignmentRoutes);
 
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
