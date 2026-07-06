@@ -4,10 +4,8 @@ require('dotenv').config();
 
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoute');
-const assignmentRoutes = require('./routes/assignmentRoutes');
 const userQuerryRoutes = require('./routes/userQuerryRoutes');
 const workerAssignmentRoutes = require('./routes/WorkerAssignmentRoutes');
-
 
 const app = express();
 connectDB();
@@ -22,9 +20,7 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, etc)
     if (!origin) return callback(null, true);
-    
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
@@ -40,43 +36,57 @@ const corsOptions = {
   maxAge: 86400,
 };
 
-// Apply CORS middleware - this automatically handles OPTIONS requests
+// Apply CORS middleware
 app.use(cors(corsOptions));
-
-// Remove this line - it's causing the error:
-// app.options('*', cors(corsOptions));
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Add this after app.use(express.urlencoded...)
+// Debug endpoint
 app.get('/api/debug', (req, res) => {
   res.json({
     message: 'Backend is running!',
-    registeredRoutes: [
-      '/api/auth',
-      '/api/assignments',
-      '/api/queries'
-    ]
+    registeredRoutes: {
+      auth: '/api/auth',
+      queries: '/api/queries',
+      workerAssignments: '/api/worker/assignments'
+    },
+    note: 'All routes require authentication except /api/debug'
   });
 });
 
-// Also add a test endpoint for assignments
-app.get('/api/assignments/test', (req, res) => {
-  res.json({ message: 'Assignments route is working!' });
-});
-// Your routes
+// ============= REGISTER ROUTES =============
+
 app.use('/api/auth', authRoutes);
-app.use('/api/assignments', assignmentRoutes);
 app.use('/api/queries', userQuerryRoutes);
-app.use('/api/assignments', assignmentRoutes);
 app.use('/api/worker/assignments', workerAssignmentRoutes);
 
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// 404 handler for undefined routes
+app.use((req, res) => {
+  console.log(`❌ Route not found: ${req.method} ${req.url}`);
+  res.status(404).json({
+    success: false,
+    error: `Route not found: ${req.method} ${req.url}`
+  });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('❌ Server error:', err);
+  res.status(500).json({
+    success: false,
+    error: err.message || 'Internal server error'
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-  console.log(`CORS enabled for: ${allowedOrigins.join(', ')}`);
+  console.log(`✅ Server is running on http://localhost:${PORT}`);
+  console.log(`📋 CORS enabled for: ${allowedOrigins.join(', ')}`);
+  console.log(`📋 Registered Routes:`);
+  console.log(`   🔐 /api/auth - Authentication`);
+  console.log(`   🔐 /api/queries - User Queries & Admin Management`);
+  console.log(`   🔐 /api/worker/assignments - Worker Assignments`);
 });
