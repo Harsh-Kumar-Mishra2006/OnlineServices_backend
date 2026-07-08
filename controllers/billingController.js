@@ -1,30 +1,46 @@
+// controllers/billingController.js
 const Bill = require('../models/Bill');
-const UserQuery = require('../models/userQuerry');
 const Auth = require('../models/authModel');
-const Worker = require('../models/addWorker');
 const mongoose = require('mongoose');
 
 // ============= ADMIN FUNCTIONS =============
 
-// Create a new bill for a completed query
+// Create a new bill (Manual Entry)
 const createBill = async (req, res) => {
   try {
     const {
-      query_id,
+      customer_name,
+      customer_email,
+      customer_phone,
+      customer_address,
+      service_type,
+      service_description,
+      worker_name,
+      worker_phone,
       items,
-      tax_rate,
       discount,
-      discount_type,
-      due_date,
-      notes,
-      terms_conditions
+      notes
     } = req.body;
 
     // Validate required fields
-    if (!query_id) {
+    if (!customer_name || !customer_email || !customer_phone) {
       return res.status(400).json({
         success: false,
-        error: 'Query ID is required'
+        error: 'Customer name, email, and phone are required'
+      });
+    }
+
+    if (!service_type || !service_description) {
+      return res.status(400).json({
+        success: false,
+        error: 'Service type and description are required'
+      });
+    }
+
+    if (!worker_name || !worker_phone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Worker name and phone are required'
       });
     }
 
@@ -32,6 +48,15 @@ const createBill = async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'At least one billing item is required'
+      });
+    }
+
+    // Validate items
+    const invalidItems = items.some(item => !item.description || !item.rate || item.rate <= 0);
+    if (invalidItems) {
+      return res.status(400).json({
+        success: false,
+        error: 'All items must have description and valid rate'
       });
     }
 
@@ -52,35 +77,6 @@ const createBill = async (req, res) => {
       });
     }
 
-    // Get the query
-    const query = await UserQuery.findById(query_id)
-      .populate('user', 'name email phone')
-      .populate('assigned_to', 'name service_type phone_number');
-
-    if (!query) {
-      return res.status(404).json({
-        success: false,
-        error: 'Query not found'
-      });
-    }
-
-    // Check if query is completed
-    if (query.status !== 'completed') {
-      return res.status(400).json({
-        success: false,
-        error: 'Bills can only be created for completed services'
-      });
-    }
-
-    // Check if a bill already exists for this query
-    const existingBill = await Bill.findOne({ query: query_id });
-    if (existingBill) {
-      return res.status(400).json({
-        success: false,
-        error: 'A bill already exists for this query'
-      });
-    }
-
     // Calculate totals
     let subtotal = 0;
     const processedItems = items.map(item => {
@@ -94,47 +90,32 @@ const createBill = async (req, res) => {
       };
     });
 
-    // Calculate tax
-    const taxRate = tax_rate || 0;
-    const tax = (subtotal * taxRate) / 100;
-
-    // Calculate discount
-    let discountAmount = 0;
-    if (discount && discount > 0) {
-      if (discount_type === 'percentage') {
-        discountAmount = (subtotal * discount) / 100;
-      } else {
-        discountAmount = discount;
-      }
-    }
-
-    const totalAmount = subtotal + tax - discountAmount;
+    const discountAmount = discount || 0;
+    const totalAmount = subtotal - discountAmount;
 
     // Generate bill number
     const billNumber = await Bill.generateBillNumber();
 
     // Create bill
     const bill = await Bill.create({
-      query: query_id,
-      user: query.user._id,
-      worker: query.assigned_to._id,
       bill_number: billNumber,
-      service_type: query.service_type_required,
-      service_description: query.issue,
+      customer_name,
+      customer_email,
+      customer_phone,
+      customer_address: customer_address || {},
+      service_type,
+      service_description,
+      worker_name,
+      worker_phone,
       items: processedItems,
       subtotal: subtotal,
-      tax: tax,
-      tax_rate: taxRate,
       discount: discountAmount,
-      discount_type: discount_type || 'fixed',
       total_amount: totalAmount,
-      due_date: due_date || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000), // 15 days default
       notes: notes || '',
-      terms_conditions: terms_conditions || 'Payment is due within 15 days. Late payments may incur additional charges.',
       created_by: admin._id
     });
 
-    console.log(`✅ Bill created: ${billNumber} for user ${query.user.email}`);
+    console.log(`✅ Bill created: ${billNumber} by admin ${admin.email}`);
 
     res.status(201).json({
       success: true,
@@ -155,11 +136,6 @@ const createBill = async (req, res) => {
 const getAllBills = async (req, res) => {
   try {
     const {
-      status,
-      user_id,
-      query_id,
-      date_from,
-      date_to,
       page = 1,
       limit = 20,
       sort_by = 'created_at',
@@ -168,25 +144,11 @@ const getAllBills = async (req, res) => {
 
     let query = { is_deleted: false };
 
-    // Filters
-    if (status) query.payment_status = status;
-    if (user_id) query.user = user_id;
-    if (query_id) query.query = query_id;
-    
-    if (date_from || date_to) {
-      query.created_at = {};
-      if (date_from) query.created_at.$gte = new Date(date_from);
-      if (date_to) query.created_at.$lte = new Date(date_to);
-    }
-
     // Sorting
     let sort = {};
     sort[sort_by] = sort_order === 'desc' ? -1 : 1;
 
     const bills = await Bill.find(query)
-      .populate('user', 'name email phone')
-      .populate('worker', 'name service_type phone_number')
-      .populate('query', 'issue service_type_required status')
       .populate('created_by', 'name email')
       .sort(sort)
       .limit(limit * 1)
@@ -197,9 +159,6 @@ const getAllBills = async (req, res) => {
     // Summary statistics
     const summary = {
       total_bills: await Bill.countDocuments({ is_deleted: false }),
-      pending: await Bill.countDocuments({ payment_status: 'pending', is_deleted: false }),
-      paid: await Bill.countDocuments({ payment_status: 'paid', is_deleted: false }),
-      overdue: await Bill.countDocuments({ payment_status: 'overdue', is_deleted: false }),
       total_amount: await Bill.aggregate([
         { $match: { is_deleted: false } },
         { $group: { _id: null, total: { $sum: '$total_amount' } } }
@@ -224,7 +183,7 @@ const getAllBills = async (req, res) => {
   }
 };
 
-// Get bill by ID (Admin/User)
+// Get bill by ID
 const getBillById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -237,28 +196,12 @@ const getBillById = async (req, res) => {
     }
 
     const bill = await Bill.findById(id)
-      .populate('user', 'name email phone address')
-      .populate('worker', 'name service_type phone_number rating')
-      .populate('query', 'issue service_type_required status created_at')
       .populate('created_by', 'name email');
 
     if (!bill || bill.is_deleted) {
       return res.status(404).json({
         success: false,
         error: 'Bill not found'
-      });
-    }
-
-    // Check authorization
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, 'mypassword');
-    const user = await Auth.findById(decoded.userId);
-
-    if (bill.user._id.toString() !== decoded.userId && user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied. You can only view your own bills.'
       });
     }
 
@@ -290,23 +233,16 @@ const updateBill = async (req, res) => {
       });
     }
 
-    // Check if bill is already paid
-    if (bill.payment_status === 'paid') {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot update a paid bill'
-      });
-    }
-
     // Allowed fields for update
-    const allowedUpdates = ['items', 'tax_rate', 'discount', 'discount_type', 'due_date', 'notes', 'terms_conditions'];
-    
-    // Recalculate totals if items, tax, or discount changes
+    const allowedUpdates = [
+      'customer_name', 'customer_email', 'customer_phone', 'customer_address',
+      'service_type', 'service_description',
+      'worker_name', 'worker_phone',
+      'items', 'discount', 'notes'
+    ];
+
     let recalculate = false;
     let subtotal = bill.subtotal;
-    let tax = bill.tax;
-    let discount = bill.discount;
-    let totalAmount = bill.total_amount;
 
     if (updates.items) {
       subtotal = 0;
@@ -323,25 +259,6 @@ const updateBill = async (req, res) => {
       recalculate = true;
     }
 
-    if (updates.tax_rate !== undefined) {
-      tax = (subtotal * updates.tax_rate) / 100;
-      recalculate = true;
-    }
-
-    if (updates.discount !== undefined) {
-      const discountType = updates.discount_type || bill.discount_type;
-      if (discountType === 'percentage') {
-        discount = (subtotal * updates.discount) / 100;
-      } else {
-        discount = updates.discount;
-      }
-      recalculate = true;
-    }
-
-    if (recalculate) {
-      totalAmount = subtotal + tax - discount;
-    }
-
     // Apply updates
     allowedUpdates.forEach(field => {
       if (updates[field] !== undefined) {
@@ -351,9 +268,11 @@ const updateBill = async (req, res) => {
 
     if (recalculate) {
       bill.subtotal = subtotal;
-      bill.tax = tax;
-      bill.discount = discount;
-      bill.total_amount = totalAmount;
+      bill.total_amount = subtotal - (bill.discount || 0);
+    }
+
+    if (updates.discount !== undefined) {
+      bill.total_amount = bill.subtotal - (updates.discount || 0);
     }
 
     bill.updated_at = new Date();
@@ -387,13 +306,6 @@ const deleteBill = async (req, res) => {
       });
     }
 
-    if (bill.payment_status === 'paid') {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot delete a paid bill'
-      });
-    }
-
     bill.is_deleted = true;
     bill.updated_at = new Date();
     await bill.save();
@@ -412,47 +324,9 @@ const deleteBill = async (req, res) => {
   }
 };
 
-// Mark bill as paid (Admin)
-const markBillAsPaid = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { payment_method, payment_transaction_id } = req.body;
-
-    const bill = await Bill.findById(id);
-    if (!bill || bill.is_deleted) {
-      return res.status(404).json({
-        success: false,
-        error: 'Bill not found'
-      });
-    }
-
-    if (bill.payment_status === 'paid') {
-      return res.status(400).json({
-        success: false,
-        error: 'Bill is already paid'
-      });
-    }
-
-    await bill.markAsPaid(payment_method, payment_transaction_id);
-
-    res.json({
-      success: true,
-      message: 'Bill marked as paid successfully',
-      data: bill
-    });
-
-  } catch (error) {
-    console.error('Error marking bill as paid:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-};
-
 // ============= USER FUNCTIONS =============
 
-// Get user's bills (User)
+// Get user's bills (by email)
 const getMyBills = async (req, res) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -462,15 +336,20 @@ const getMyBills = async (req, res) => {
 
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, 'mypassword');
+    
+    const user = await Auth.findById(decoded.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
 
-    const { status, page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 10 } = req.query;
 
-    let query = { user: decoded.userId, is_deleted: false };
-    if (status) query.payment_status = status;
+    let query = { 
+      customer_email: user.email,
+      is_deleted: false 
+    };
 
     const bills = await Bill.find(query)
-      .populate('query', 'issue service_type_required status')
-      .populate('worker', 'name service_type')
       .sort({ created_at: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -480,21 +359,15 @@ const getMyBills = async (req, res) => {
     // Get summary
     const summary = {
       total_bills: total,
-      total_pending: await Bill.countDocuments({ 
-        user: decoded.userId, 
-        payment_status: 'pending',
-        is_deleted: false 
-      }),
-      total_paid: await Bill.countDocuments({ 
-        user: decoded.userId, 
-        payment_status: 'paid',
-        is_deleted: false 
-      }),
-      total_overdue: await Bill.countDocuments({ 
-        user: decoded.userId, 
-        payment_status: 'overdue',
-        is_deleted: false 
-      })
+      total_amount: await Bill.aggregate([
+        { 
+          $match: { 
+            customer_email: user.email,
+            is_deleted: false 
+          } 
+        },
+        { $group: { _id: null, total: { $sum: '$total_amount' } } }
+      ])
     };
 
     res.json({
@@ -525,36 +398,40 @@ const getBillSummary = async (req, res) => {
 
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, 'mypassword');
+    
+    const user = await Auth.findById(decoded.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
 
-    const userId = decoded.userId;
+    const totalBills = await Bill.countDocuments({ 
+      customer_email: user.email, 
+      is_deleted: false 
+    });
 
-    const totalBills = await Bill.countDocuments({ user: userId, is_deleted: false });
-    const pendingBills = await Bill.countDocuments({ user: userId, payment_status: 'pending', is_deleted: false });
-    const paidBills = await Bill.countDocuments({ user: userId, payment_status: 'paid', is_deleted: false });
-    const overdueBills = await Bill.countDocuments({ user: userId, payment_status: 'overdue', is_deleted: false });
-
-    // Get total amount due
+    // Get total amount
     const result = await Bill.aggregate([
       {
         $match: { 
-          user: new mongoose.Types.ObjectId(userId),
-          payment_status: { $in: ['pending', 'overdue'] },
+          customer_email: user.email,
           is_deleted: false 
         }
       },
       {
         $group: {
           _id: null,
-          total_due: { $sum: '$total_amount' }
+          total: { $sum: '$total_amount' }
         }
       }
     ]);
 
-    const totalDue = result.length > 0 ? result[0].total_due : 0;
+    const totalAmount = result.length > 0 ? result[0].total : 0;
 
     // Get recent bills (last 5)
-    const recentBills = await Bill.find({ user: userId, is_deleted: false })
-      .populate('query', 'service_type_required')
+    const recentBills = await Bill.find({ 
+      customer_email: user.email, 
+      is_deleted: false 
+    })
       .sort({ created_at: -1 })
       .limit(5);
 
@@ -562,10 +439,7 @@ const getBillSummary = async (req, res) => {
       success: true,
       data: {
         total_bills: totalBills,
-        pending: pendingBills,
-        paid: paidBills,
-        overdue: overdueBills,
-        total_amount_due: totalDue,
+        total_amount: totalAmount,
         recent_bills: recentBills
       }
     });
@@ -591,16 +465,17 @@ const getUserBillById = async (req, res) => {
 
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, 'mypassword');
+    
+    const user = await Auth.findById(decoded.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
 
     const bill = await Bill.findOne({ 
       _id: id, 
-      user: decoded.userId,
+      customer_email: user.email,
       is_deleted: false 
-    })
-      .populate('user', 'name email phone address')
-      .populate('worker', 'name service_type phone_number rating')
-      .populate('query', 'issue service_type_required status created_at')
-      .populate('created_by', 'name email');
+    });
 
     if (!bill) {
       return res.status(404).json({
@@ -630,7 +505,6 @@ module.exports = {
   getBillById,
   updateBill,
   deleteBill,
-  markBillAsPaid,
   
   // User functions
   getMyBills,
