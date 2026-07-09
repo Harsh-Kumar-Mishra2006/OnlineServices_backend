@@ -7,7 +7,7 @@ const authRoutes = require('./routes/authRoute');
 const userQuerryRoutes = require('./routes/userQuerryRoutes');
 const workerAssignmentRoutes = require('./routes/WorkerAssignmentRoutes');
 const billingRoutes = require('./routes/billingRoutes');
-
+const paymentRoutes = require('./routes/paymentRoutes');
 
 const app = express();
 connectDB();
@@ -62,10 +62,16 @@ app.use('/api/auth', authRoutes);
 app.use('/api/queries', userQuerryRoutes);
 app.use('/api/worker/assignments', workerAssignmentRoutes);
 app.use('/api/bills', billingRoutes);
+app.use('/api/payments', paymentRoutes); 
 
 
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+const fs = require('fs');
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads');
+}
 
 // 404 handler for undefined routes
 app.use((req, res) => {
