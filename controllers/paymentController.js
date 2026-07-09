@@ -1,7 +1,8 @@
+// controllers/paymentController.js
 const Payment = require('../models/Payment');
 const Bill = require('../models/Bill');
 const Auth = require('../models/authModel');
-const cloudinary = require('../config/Cloudinary');
+const cloudinary = require('../config/cloudinary');
 const mongoose = require('mongoose');
 
 // ============= USER FUNCTIONS =============
@@ -11,6 +12,9 @@ const initiatePayment = async (req, res) => {
   try {
     const { bill_id, user_notes } = req.body;
     const file = req.file;
+
+    console.log('📝 Initiating payment for bill:', bill_id);
+    console.log('📎 File received:', file ? file.originalname : 'No file');
 
     if (!bill_id) {
       return res.status(400).json({
@@ -72,11 +76,13 @@ const initiatePayment = async (req, res) => {
     }
 
     // Upload to Cloudinary
+    console.log('📤 Uploading to Cloudinary...');
     const result = await cloudinary.uploader.upload(file.path, {
       folder: 'payments',
       resource_type: 'image',
       allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp']
     });
+    console.log('✅ Cloudinary upload successful:', result.secure_url);
 
     // Create payment record
     const payment = await Payment.create({
@@ -99,7 +105,7 @@ const initiatePayment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error initiating payment:', error);
+    console.error('❌ Error initiating payment:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -119,6 +125,8 @@ const getMyPayments = async (req, res) => {
     const decoded = jwt.verify(token, 'mypassword');
 
     const { page = 1, limit = 10 } = req.query;
+
+    console.log('🔍 Fetching payments for user:', decoded.userId);
 
     const payments = await Payment.find({ user: decoded.userId })
       .populate('bill', 'bill_number total_amount service_type')
@@ -145,6 +153,8 @@ const getMyPayments = async (req, res) => {
       })
     };
 
+    console.log(`✅ Found ${payments.length} payments for user`);
+
     res.json({
       success: true,
       data: payments,
@@ -155,7 +165,7 @@ const getMyPayments = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching payments:', error);
+    console.error('❌ Error fetching payments:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -196,7 +206,7 @@ const getPaymentById = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching payment:', error);
+    console.error('❌ Error fetching payment:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -223,6 +233,8 @@ const getAllPayments = async (req, res) => {
     let sort = {};
     sort[sort_by] = sort_order === 'desc' ? -1 : 1;
 
+    console.log('🔍 Fetching all payments with filters:', { status, page, limit });
+
     const payments = await Payment.find(query)
       .populate('user', 'name email phone')
       .populate('bill', 'bill_number total_amount service_type customer_name')
@@ -241,6 +253,8 @@ const getAllPayments = async (req, res) => {
       rejected: await Payment.countDocuments({ status: 'rejected' })
     };
 
+    console.log(`✅ Found ${payments.length} payments`);
+
     res.json({
       success: true,
       data: payments,
@@ -251,7 +265,7 @@ const getAllPayments = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching payments:', error);
+    console.error('❌ Error fetching payments:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -289,6 +303,8 @@ const verifyPayment = async (req, res) => {
       });
     }
 
+    console.log(`🔍 Verifying payment ${id} as ${status}`);
+
     const payment = await Payment.findById(id);
     if (!payment) {
       return res.status(404).json({
@@ -314,13 +330,18 @@ const verifyPayment = async (req, res) => {
 
     // If verified, update bill
     if (status === 'verified') {
-      await Bill.findByIdAndUpdate(payment.bill, {
-        is_paid: true,
-        payment: payment._id
-      });
+      const updatedBill = await Bill.findByIdAndUpdate(
+        payment.bill,
+        {
+          is_paid: true,
+          payment: payment._id
+        },
+        { new: true }
+      );
+      console.log(`✅ Bill ${updatedBill.bill_number} marked as paid`);
     }
 
-    console.log(`✅ Payment ${status} by admin ${admin.email} for bill ${payment.bill_number}`);
+    console.log(`✅ Payment ${status} by admin ${admin.email}`);
 
     res.json({
       success: true,
@@ -329,7 +350,7 @@ const verifyPayment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error verifying payment:', error);
+    console.error('❌ Error verifying payment:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -360,7 +381,7 @@ const getPaymentDetails = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching payment:', error);
+    console.error('❌ Error fetching payment:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -392,7 +413,7 @@ const deletePayment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error deleting payment:', error);
+    console.error('❌ Error deleting payment:', error);
     res.status(500).json({
       success: false,
       error: error.message

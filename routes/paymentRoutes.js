@@ -1,3 +1,4 @@
+// routes/paymentRoutes.js
 const express = require('express');
 const router = express.Router();
 const authenticateToken = require('../middlewares/authMiddleware');
