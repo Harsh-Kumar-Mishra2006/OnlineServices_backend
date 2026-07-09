@@ -1,7 +1,7 @@
 const Payment = require('../models/Payment');
 const Bill = require('../models/Bill');
 const Auth = require('../models/authModel');
-const cloudinary = require('../config/cloudinary');
+const cloudinary = require('../config/Cloudinary');
 const mongoose = require('mongoose');
 
 // ============= USER FUNCTIONS =============
