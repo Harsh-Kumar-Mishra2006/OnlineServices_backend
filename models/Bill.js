@@ -88,6 +88,19 @@ const billSchema = new mongoose.Schema({
     required: true,
     min: 0
   },
+
+  // Add this field to the bill schema
+  payment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Payment',
+    default: null
+  },
+
+  // Add this field to track if bill is paid
+  is_paid: {
+    type: Boolean,
+    default: false
+  },
   
   // Additional Notes
   notes: {
