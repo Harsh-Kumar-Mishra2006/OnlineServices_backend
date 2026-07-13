@@ -5,6 +5,22 @@ const mongoose = require('mongoose');
 
 // ============= WORKER ASSIGNMENT CONTROLLER =============
 
+// Helper function to find worker by user ID
+const findWorkerByUserId = async (userId) => {
+  // First try to find by created_by (if worker was created by admin)
+  let worker = await Worker.findOne({ created_by: userId });
+  
+  if (worker) return worker;
+  
+  // If not found, get user details to find by phone
+  const user = await Auth.findById(userId);
+  if (!user) return null;
+  
+  // Find worker by phone number
+  worker = await Worker.findOne({ phone_number: user.phone });
+  return worker;
+};
+
 // Get all assignments for a worker
 const getMyAssignments = async (req, res) => {
   try {
@@ -16,11 +32,20 @@ const getMyAssignments = async (req, res) => {
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, 'mypassword');
     
-    // Get worker from auth
-    const worker = await Worker.findOne({ email: decoded.email });
+    console.log('🔍 Decoded token userId:', decoded.userId);
+    
+    // Find worker using the helper function
+    const worker = await findWorkerByUserId(decoded.userId);
+    
     if (!worker) {
-      return res.status(404).json({ success: false, error: 'Worker not found' });
+      console.log('❌ Worker not found for user:', decoded.userId);
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Worker profile not found. Please contact admin.' 
+      });
     }
+
+    console.log('✅ Worker found:', worker.name, 'Phone:', worker.phone_number);
 
     const { 
       status, 
@@ -90,7 +115,7 @@ const getMyAssignments = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching worker assignments:', error);
+    console.error('❌ Error fetching worker assignments:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -115,9 +140,14 @@ const getAssignmentDetails = async (req, res) => {
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, 'mypassword');
     
-    const worker = await Worker.findOne({ email: decoded.email });
+    // Find worker using the helper function
+    const worker = await findWorkerByUserId(decoded.userId);
+    
     if (!worker) {
-      return res.status(404).json({ success: false, error: 'Worker not found' });
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Worker profile not found. Please contact admin.' 
+      });
     }
 
     const assignment = await UserQuery.findById(id)
@@ -130,7 +160,7 @@ const getAssignmentDetails = async (req, res) => {
     }
 
     // Verify this assignment belongs to the worker
-    if (assignment.assigned_to._id.toString() !== worker._id.toString()) {
+    if (!assignment.assigned_to || assignment.assigned_to._id.toString() !== worker._id.toString()) {
       return res.status(403).json({ 
         success: false, 
         error: 'You are not authorized to view this assignment' 
@@ -143,7 +173,7 @@ const getAssignmentDetails = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching assignment details:', error);
+    console.error('❌ Error fetching assignment details:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -173,9 +203,14 @@ const updateAssignmentStatus = async (req, res) => {
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, 'mypassword');
     
-    const worker = await Worker.findOne({ email: decoded.email });
+    // Find worker using the helper function
+    const worker = await findWorkerByUserId(decoded.userId);
+    
     if (!worker) {
-      return res.status(404).json({ success: false, error: 'Worker not found' });
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Worker profile not found. Please contact admin.' 
+      });
     }
 
     const assignment = await UserQuery.findById(id);
@@ -232,7 +267,7 @@ const updateAssignmentStatus = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error updating assignment status:', error);
+    console.error('❌ Error updating assignment status:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -251,9 +286,14 @@ const getWorkerDashboardStats = async (req, res) => {
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, 'mypassword');
     
-    const worker = await Worker.findOne({ email: decoded.email });
+    // Find worker using the helper function
+    const worker = await findWorkerByUserId(decoded.userId);
+    
     if (!worker) {
-      return res.status(404).json({ success: false, error: 'Worker not found' });
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Worker profile not found. Please contact admin.' 
+      });
     }
 
     // Get all assignments
@@ -328,7 +368,7 @@ const getWorkerDashboardStats = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching dashboard stats:', error);
+    console.error('❌ Error fetching dashboard stats:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -357,9 +397,14 @@ const submitCompletionReport = async (req, res) => {
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, 'mypassword');
     
-    const worker = await Worker.findOne({ email: decoded.email });
+    // Find worker using the helper function
+    const worker = await findWorkerByUserId(decoded.userId);
+    
     if (!worker) {
-      return res.status(404).json({ success: false, error: 'Worker not found' });
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Worker profile not found. Please contact admin.' 
+      });
     }
 
     const assignment = await UserQuery.findById(id);
@@ -396,7 +441,7 @@ const submitCompletionReport = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error submitting completion report:', error);
+    console.error('❌ Error submitting completion report:', error);
     res.status(500).json({
       success: false,
       error: error.message
