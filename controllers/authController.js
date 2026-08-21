@@ -194,13 +194,15 @@ const signup = async (req, res) => {
   }
 };
 
+// In your authController.js, update the createWorkerByAdmin function:
+
 // Admin creates worker with phone number as primary login
 const createWorkerByAdmin = async (req, res) => {
   try {
     const { 
       name, phone, password, 
       service_type, address, experience_years, 
-      skills, hourly_rate, bio, certifications,
+      skills, bio, certifications, // REMOVED hourly_rate
       email, username // Optional fields
     } = req.body;
 
@@ -276,7 +278,7 @@ const createWorkerByAdmin = async (req, res) => {
       isActive: true
     });
 
-    // Create Worker profile - email is optional now
+    // Create Worker profile - email is optional now, hourly_rate REMOVED
     const workerProfile = await Worker.create({
       name,
       email: email || null, // Allow null
@@ -293,7 +295,7 @@ const createWorkerByAdmin = async (req, res) => {
       skills: skills || [],
       certifications: certifications || [],
       bio: bio || '',
-      hourly_rate: hourly_rate || 0,
+      // hourly_rate: hourly_rate || 0, // REMOVED
       status: 'active',
       created_by: admin._id
     });
@@ -311,7 +313,7 @@ const createWorkerByAdmin = async (req, res) => {
           phone: workerProfile.phone_number,
           email: workerProfile.email || 'Not provided',
           service_type: workerProfile.service_type,
-          hourly_rate: workerProfile.hourly_rate,
+          // hourly_rate: workerProfile.hourly_rate, // REMOVED
           status: workerProfile.status
         },
         auth: {
@@ -343,7 +345,7 @@ const createWorkerByAdmin = async (req, res) => {
   }
 };
 
-// Login function - now supports phone number login for workers
+// Update the login function to handle username properly
 const login = async (req, res) => {
   try {
     const { email, username, phone, password } = req.body;
@@ -445,6 +447,13 @@ const login = async (req, res) => {
       sameSite: 'lax'
     });
 
+    // FIX: Handle username properly - if null/undefined, use phone or name as fallback
+    let displayUsername = user.username;
+    if (!displayUsername || displayUsername === 'null' || displayUsername === 'undefined') {
+      // For workers without username, use their phone number or name
+      displayUsername = user.role === 'worker' ? user.phone : user.name;
+    }
+
     res.json({
       success: true,
       data: token,
@@ -452,7 +461,7 @@ const login = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email || 'Not provided',
-        username: user.username || 'Not provided',
+        username: displayUsername, // Use the fixed username
         phone: user.phone,
         role: user.role,
         profile: user.profile
@@ -468,6 +477,7 @@ const login = async (req, res) => {
     });
   }
 };
+
 
 // Get all workers (for users to browse) - only show active workers
 const getAllWorkers = async (req, res) => {
@@ -566,7 +576,7 @@ const updateWorkerProfile = async (req, res) => {
   }
 };
 
-// Get user profile
+// Also update the getProfile function to handle username properly
 const getProfile = async (req, res) => {
   try {
     let token = req.header('Authorization') || req.headers.authorization;
@@ -594,13 +604,20 @@ const getProfile = async (req, res) => {
       });
     }
     
+    // FIX: Handle username properly for workers
+    let displayUsername = user.username;
+    if (!displayUsername || displayUsername === 'null' || displayUsername === 'undefined') {
+      // For workers without username, use phone number or name as fallback
+      displayUsername = user.role === 'worker' ? user.phone : user.name;
+    }
+    
     return res.json({
       success: true,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        username: user.username,
+        username: displayUsername, // Use the fixed username
         phone: user.phone,
         role: user.role,
         profile: user.profile,
@@ -616,6 +633,7 @@ const getProfile = async (req, res) => {
     });
   }
 };
+
 
 const logout = async (req, res) => {
   try {
