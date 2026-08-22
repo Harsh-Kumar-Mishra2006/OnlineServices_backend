@@ -10,7 +10,8 @@ const {
   deleteBill,
   getMyBills,
   getBillSummary,
-  getUserBillById
+  getUserBillById,
+  uploadQR
 } = require('../controllers/billingController');
 
 // ============= USER ROUTES =============
@@ -19,10 +20,10 @@ router.get('/my-bills/summary', authenticateToken, getBillSummary);
 router.get('/my-bills/:id', authenticateToken, getUserBillById);
 
 // ============= ADMIN ROUTES =============
-router.post('/admin/create', authenticateToken, createBill);
+router.post('/admin/create', authenticateToken, uploadQR, createBill);
 router.get('/admin/all', authenticateToken, getAllBills);
 router.get('/admin/:id', authenticateToken, getBillById);
-router.put('/admin/:id', authenticateToken, updateBill);
+router.put('/admin/:id', authenticateToken, uploadQR, updateBill);
 router.delete('/admin/:id', authenticateToken, deleteBill);
 
 module.exports = router;

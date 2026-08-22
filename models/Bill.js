@@ -102,6 +102,11 @@ const billSchema = new mongoose.Schema({
     default: false
   },
   
+  qr_code: {
+    type: String,
+    default: null
+  },
+  
   // Additional Notes
   notes: {
     type: String,
