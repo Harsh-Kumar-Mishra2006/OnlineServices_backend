@@ -2,7 +2,7 @@
 const Bill = require('../models/Bill');
 const Auth = require('../models/authModel');
 const mongoose = require('mongoose');
-const cloudinary = require('../config/cloudinary');
+const cloudinary = require('../config/Cloudinary');
 const multer = require('multer');
 const path = require('path');
 
