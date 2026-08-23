@@ -95,11 +95,11 @@ const workerSchema = new mongoose.Schema({
     type: String,
     maxlength: 500
   },
-  hourly_rate: {
-    type: Number,
-    required: [true, 'Hourly rate is required'],
-    min: [0, 'Hourly rate cannot be negative']
-  },
+  // hourly_rate: {
+  //   type: Number,
+  //   required: [true, 'Hourly rate is required'],
+  //   min: [0, 'Hourly rate cannot be negative']
+  // },
   availability: {
     monday: { type: Boolean, default: true },
     tuesday: { type: Boolean, default: true },
